@@ -1,0 +1,41 @@
+name: Bug 反馈
+description: 报告可复现的问题
+title: "[Bug] "
+labels: ["bug"]
+body:
+  - type: dropdown
+    id: platform
+    attributes:
+      label: 使用平台
+      options:
+        - macOS Apple Silicon
+        - Windows 11 x64
+        - Windows 10 x64
+        - 浏览器原型
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 应用版本
+      placeholder: 例如 v0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: 请按顺序描述如何触发问题
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 期望结果与实际结果
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: 补充信息
+      description: 可添加截图、股票代码和网络环境；请勿提交密码或其他敏感信息。

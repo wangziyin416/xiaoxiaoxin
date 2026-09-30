@@ -1,0 +1,14 @@
+{
+  "id": "xiaoxin-default",
+  "name": "小小信",
+  "version": 1,
+  "author": "prototype",
+  "states": {
+    "idle": "xiaoxin.png",
+    "rise": "xiaoxin.png",
+    "fall": "xiaoxin.png",
+    "offline": "xiaoxin.png",
+    "sleep": "xiaoxin.png",
+    "concert": "mayday-concert.png"
+  }
+}

@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="theme-color" content="#f7f3eb" />
+    <title>小小信 · A股桌面行情宠物</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="stage" aria-label="小小信桌面行情原型">
+      <section class="pet-window" id="petWindow">
+        <header class="window-bar">
+          <div class="traffic-lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <span>小小信</span>
+          <button class="icon-button" id="collapseButton" aria-label="收起行情">—</button>
+        </header>
+
+        <div class="search-row">
+          <label class="search-box">
+            <span aria-hidden="true">⌕</span>
+            <input id="stockInput" value="600183" placeholder="输入6位股票代码" autocomplete="off" inputmode="numeric" maxlength="9" />
+          </label>
+          <button class="primary-button" id="searchButton">查看</button>
+        </div>
+        <div class="search-results" id="searchResults" role="listbox" aria-label="股票搜索结果"></div>
+
+        <div class="quote">
+          <div>
+            <p class="eyebrow"><span id="marketStatus" class="status-dot"></span> <span id="marketLabel">A股 · 行情</span></p>
+            <h1><span id="stockName">生益科技</span><small id="stockCode">600183.SH</small></h1>
+          </div>
+          <button class="icon-button refresh" id="refreshButton" aria-label="手动刷新">↻</button>
+        </div>
+
+        <div class="price-row">
+          <strong id="currentPrice">132.24</strong>
+          <span id="change" class="up">+0.29&nbsp;&nbsp;+0.22%</span>
+        </div>
+
+        <div class="chart-wrap">
+          <svg id="chart" viewBox="0 0 520 168" role="img" aria-label="当日分时走势图">
+            <defs>
+              <linearGradient id="areaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stop-color="#e85d54" stop-opacity=".24" />
+                <stop offset="1" stop-color="#e85d54" stop-opacity="0" />
+              </linearGradient>
+            </defs>
+            <g class="grid-lines"><line x1="0" y1="42" x2="520" y2="42"/><line x1="0" y1="84" x2="520" y2="84"/><line x1="0" y1="126" x2="520" y2="126"/></g>
+            <path id="areaPath" class="area" />
+            <path id="linePath" class="line" />
+            <circle id="lastPoint" r="5" />
+          </svg>
+          <div class="chart-axis"><span>09:30</span><span>11:30/13:00</span><span>15:00</span></div>
+        </div>
+
+        <dl class="metrics">
+          <div><dt>今开</dt><dd id="openPrice">1,410.20</dd></div>
+          <div><dt>最高</dt><dd id="highPrice">1,432.80</dd></div>
+          <div><dt>最低</dt><dd id="lowPrice">1,405.60</dd></div>
+          <div><dt>昨收</dt><dd id="prevPrice">1,410.70</dd></div>
+        </dl>
+
+        <footer>
+          <span id="updateText">刚刚更新 · 自动刷新 20 秒</span>
+          <button id="bossButton">老板键 <kbd>⌘⇧H</kbd></button>
+        </footer>
+
+        <img class="pet" src="assets/pets/default/xiaoxin.png" alt="小小信 Q 版人物" />
+        <img class="concert-band" id="concertBand" src="assets/pets/default/mayday-concert.png" alt="五月天风格 Q 版乐队演唱会" />
+        <div class="pet-effects" id="petEffects" aria-hidden="true"></div>
+        <div class="speech" id="speech" aria-live="polite">今天也稳稳向前！</div>
+        <span class="mini-status" id="miniStatus" aria-live="polite">等待刷新</span>
+        <button class="compact-expand" id="compactExpand" aria-label="展开行情">↗</button>
+      </section>
+
+      <aside class="notes">
+        <span>原型操作</span>
+        <p>桌面版输入任意六位 A 股代码；浏览器原型可测试 600519、000001 或 300750。</p>
+      </aside>
+    </main>
+    <script src="app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,8 @@
+.DS_Store
+.build/
+dist/
+windows/**/bin/
+windows/**/obj/
+*.user
+*.suo
+*.log

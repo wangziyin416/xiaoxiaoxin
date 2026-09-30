@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 安全问题
+    url: https://github.com/wangziyin416/xiaoxiaoxin/security
+    about: 请勿公开披露安全漏洞或敏感信息
