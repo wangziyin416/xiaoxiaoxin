@@ -2,7 +2,7 @@ $ErrorActionPreference = "Stop"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $outputDir = Join-Path $projectRoot "dist\windows-x64"
-$archivePath = Join-Path $projectRoot "dist\小小信-Windows-x64.zip"
+$archivePath = Join-Path $projectRoot "dist\xiaoxiaoxin-Windows-x64.zip"
 
 Set-Location $projectRoot
 

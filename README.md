@@ -12,8 +12,8 @@
 
 前往 [Releases](https://github.com/wangziyin416/xiaoxiaoxin/releases/latest) 下载对应平台版本：
 
-- `小小信-macOS.zip`：macOS 13 及以上，当前面向 Apple Silicon。
-- `小小信-Windows-x64.zip`：Windows 10/11 64 位免安装版。
+- `xiaoxiaoxin-macOS.zip`：macOS 13 及以上，当前面向 Apple Silicon。
+- `xiaoxiaoxin-Windows-x64.zip`：Windows 10/11 64 位免安装版。
 
 ## 运行 macOS 桌面版
 
@@ -29,7 +29,7 @@ open dist/小小信.app
 
 ## 运行 Windows 桌面版
 
-从 GitHub Releases 下载 `小小信-Windows-x64.zip`，完整解压后双击 `小小信.exe`。程序是免安装便携版，并自带 .NET 运行时。
+从 GitHub Releases 下载 `xiaoxiaoxin-Windows-x64.zip`，完整解压后双击 `小小信.exe`。程序是免安装便携版，并自带 .NET 运行时。
 
 - 支持 Windows 10/11 64 位系统。
 - 电脑需要安装 Microsoft Edge WebView2 Runtime；Windows 10/11 通常已经预装。
@@ -42,7 +42,7 @@ open dist/小小信.app
 .\build-windows.ps1
 ```
 
-产物位于 `dist\小小信-Windows-x64.zip`。
+产物位于 `dist\xiaoxiaoxin-Windows-x64.zip`。
 
 ## 查看浏览器原型
 
