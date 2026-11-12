@@ -31,6 +31,7 @@ h1 small { margin-left: 8px; color: #9a9288; font-size: 12px; font-weight: 500; 
 .price-row { margin-top: 13px; display: flex; align-items: baseline; gap: 15px; }
 .price-row strong { font-size: 38px; letter-spacing: -1.5px; }
 .price-row span { font-size: 14px; font-weight: 650; }
+.price-row .index-points { color: #746c63; white-space: nowrap; }
 .up { color: #db4e48; } .down { color: #2a9c68; }
 .chart-wrap { margin-top: 14px; }
 #chart { width: 100%; height: 150px; overflow: visible; }
@@ -115,6 +116,8 @@ body.native-app .pet-window:not(.collapsed) .mini-status { display: block; posit
 body.native-app .pet-window.collapsed { width: 120px; height: 56px; min-height: 56px; border-radius: 14px; background: rgba(37,34,31,.92); box-shadow: 0 10px 28px rgba(40,31,25,.22); }
 body.native-app .pet-window.collapsed .price-row { display: flex; position: absolute; inset: 0; align-items: center; justify-content: center; margin: 0; }
 body.native-app .pet-window.collapsed .price-row strong { color: #fff; font-size: 19px; letter-spacing: -.4px; }
+body.native-app .pet-window.collapsed .price-row strong.up { color: #ff8b84; }
+body.native-app .pet-window.collapsed .price-row strong.down { color: #6dd7a0; }
 body.native-app .pet-window.collapsed .price-row span { display: none; }
 body.native-app .pet-window.collapsed .pet,
 body.native-app .pet-window.collapsed .concert-band,

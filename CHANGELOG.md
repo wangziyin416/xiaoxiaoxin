@@ -2,6 +2,10 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.2.1] - 2026-11-12
+
+- 指数在收起和展开时均优先显示涨跌幅，展开时同时显示指数点位。
+
 ## [0.2.0] - 2026-11-12
 
 ### 新增
@@ -27,3 +31,4 @@
 
 [0.1.0]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.1.0
 [0.2.0]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.0
+[0.2.1]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.1

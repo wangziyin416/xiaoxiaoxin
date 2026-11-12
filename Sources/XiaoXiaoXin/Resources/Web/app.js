@@ -53,13 +53,19 @@ function renderChart(values, rising) {
 function render(demoRefresh = false) {
   if (demoRefresh && !realPoints) active.price = Math.max(.01, active.price + (Math.random() - .42) * active.price * .0015);
   const delta = active.price - active.prev;
-  const pct = active.prev ? delta / active.prev * 100 : 0;
   const rising = delta >= 0;
+  const hasPreviousClose = Number.isFinite(active.prev) && active.prev > 0;
+  const pct = hasPreviousClose ? delta / active.prev * 100 : null;
+  const percentText = pct === null ? "—" : `${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
+  const isIndex = active.securityType === "指数";
+  const direction = pct === null || pct === 0 ? "" : rising ? "up" : "down";
   $("stockName").textContent = active.name;
   $("stockCode").textContent = active.code;
-  $("currentPrice").textContent = fmt(active.price);
-  $("change").textContent = `${delta >= 0 ? "+" : ""}${fmt(delta)}  ${pct >= 0 ? "+" : ""}${pct.toFixed(2)}%`;
-  $("change").className = rising ? "up" : "down";
+  $("currentPrice").textContent = isIndex ? percentText : fmt(active.price);
+  $("currentPrice").className = isIndex ? direction : "";
+  $("currentPrice").setAttribute("aria-label", isIndex ? `指数涨跌幅 ${percentText}` : `现价 ${fmt(active.price)}`);
+  $("change").textContent = isIndex ? `${fmt(active.price)} 点` : hasPreviousClose ? `${rising ? "+" : ""}${fmt(delta)}  ${percentText}` : "—";
+  $("change").className = isIndex ? "index-points" : direction;
   $("prevPrice").textContent = fmt(active.prev);
   $("speech").textContent = rising ? "今天也稳稳向前！" : "先喝口水，慢慢来。";
   renderChart(realPoints, rising);
@@ -124,7 +130,7 @@ function setCollapsed(collapsed) {
 
 window.applyMarketData = (data) => {
   const previousDisplayedPrice = active.price;
-  active = { name: data.name, code: data.displayCode, price: data.price, prev: data.previousClose };
+  active = { name: data.name, code: data.displayCode, price: data.price, prev: data.previousClose, securityType: data.securityType };
   if (data.points?.length) realPoints = data.points;
   render();
   $("openPrice").textContent = fmt(data.open);
