@@ -2,7 +2,7 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
-## [未发布]
+## [0.2.0] - 2026-11-12
 
 ### 新增
 
@@ -26,3 +26,4 @@
 - GitHub Actions 双平台构建与标签发布流程。
 
 [0.1.0]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.1.0
+[0.2.0]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.0
