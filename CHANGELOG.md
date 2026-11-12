@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.2.2] - 2026-11-12
+
+- 启动时恢复上次成功加载的股票或指数，并自动获取行情。
+- 输入搜索词时，自动刷新继续跟随当前选中的行情。
+- 避免重复刷新打断同一笔请求，以及切换标的时沿用上一只的分时图。
+
 ## [0.2.1] - 2026-11-12
 
 - 指数在收起和展开时均优先显示涨跌幅，展开时同时显示指数点位。
@@ -32,3 +38,4 @@
 [0.1.0]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.1.0
 [0.2.0]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.0
 [0.2.1]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.1
+[0.2.2]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.2

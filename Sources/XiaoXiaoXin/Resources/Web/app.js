@@ -6,6 +6,7 @@ const stocks = {
 };
 
 const REFRESH_INTERVAL_MS = 10000;
+const INSTRUMENT_CODE = /^(?:\d{6}|(?:sh|sz)\d{6}|\d{6}\.(?:sh|sz))$/i;
 
 const $ = (id) => document.getElementById(id);
 const petWindow = $("petWindow");
@@ -16,6 +17,8 @@ let active = { ...stocks["600183"] };
 let realPoints = null;
 let timer;
 let hasLivePrice = false;
+let selectedCode = null;
+let quoteInFlight = false;
 let petClickTimer;
 let idleTimer;
 
@@ -32,6 +35,13 @@ function demoValues(rising) {
 }
 
 function renderChart(values, rising) {
+  if (nativeBridge && !values?.length) {
+    $("linePath").removeAttribute("d");
+    $("areaPath").removeAttribute("d");
+    $("lastPoint").style.visibility = "hidden";
+    return;
+  }
+  $("lastPoint").style.visibility = "visible";
   const source = values?.length ? values : demoValues(rising);
   const min = Math.min(...source);
   const max = Math.max(...source);
@@ -72,17 +82,22 @@ function render(demoRefresh = false) {
   $("updateText").textContent = `${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新 · 自动刷新 10 秒`;
 }
 
-function requestMarketData() {
-  const code = $("stockInput").value.trim();
-  if (!/^(?:\d{6}|(?:sh|sz)\d{6}|\d{6}\.(?:sh|sz))$/i.test(code)) {
-    $("speech").textContent = "请输入代码、sh/sz指数代码或中文名称～";
-    return;
-  }
+function requestMarketData(code = selectedCode) {
+  if (!code || (quoteInFlight && code === selectedCode)) return;
+  selectedCode = code;
+  quoteInFlight = true;
   $("marketLabel").textContent = "A股 · 正在更新";
   $("miniStatus").textContent = "刷新中…";
   $("refreshButton").classList.add("spinning");
   nativeBridge.postMessage({ type: "quote", code });
 }
+
+window.restoreLastInstrument = (savedCode) => {
+  if (selectedCode) return;
+  const code = INSTRUMENT_CODE.test(savedCode) ? savedCode : "600183";
+  $("stockInput").value = code;
+  requestMarketData(code);
+};
 
 function restartTimer() {
   clearInterval(timer);
@@ -90,16 +105,19 @@ function restartTimer() {
 }
 
 function refresh() {
-  $("refreshButton").classList.add("spinning");
-  nativeBridge ? requestMarketData() : render(true);
-  if (!nativeBridge) setTimeout(() => $("refreshButton").classList.remove("spinning"), 450);
+  if (nativeBridge) requestMarketData();
+  else {
+    $("refreshButton").classList.add("spinning");
+    render(true);
+    setTimeout(() => $("refreshButton").classList.remove("spinning"), 450);
+  }
   restartTimer();
 }
 
 function selectStock() {
   if (nativeBridge) {
     const query = $("stockInput").value.trim();
-    if (/^(?:\d{6}|(?:sh|sz)\d{6}|\d{6}\.(?:sh|sz))$/i.test(query)) requestMarketData();
+    if (INSTRUMENT_CODE.test(query)) requestMarketData(query);
     else if (query) {
       $("miniStatus").textContent = "搜索中…";
       nativeBridge.postMessage({ type: "search", query });
@@ -129,9 +147,12 @@ function setCollapsed(collapsed) {
 }
 
 window.applyMarketData = (data) => {
+  quoteInFlight = false;
   const previousDisplayedPrice = active.price;
+  const sameInstrument = hasLivePrice && active.code === data.displayCode;
   active = { name: data.name, code: data.displayCode, price: data.price, prev: data.previousClose, securityType: data.securityType };
   if (data.points?.length) realPoints = data.points;
+  else if (!sameInstrument) realPoints = null;
   render();
   $("openPrice").textContent = fmt(data.open);
   $("highPrice").textContent = fmt(data.high);
@@ -141,11 +162,12 @@ window.applyMarketData = (data) => {
   const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   $("miniStatus").textContent = `${time} · ${data.source || "已更新"}`;
   $("refreshButton").classList.remove("spinning");
-  if (hasLivePrice && data.price !== previousDisplayedPrice) reactToMarket(data.price > previousDisplayedPrice);
+  if (sameInstrument && data.price !== previousDisplayedPrice) reactToMarket(data.price > previousDisplayedPrice);
   hasLivePrice = true;
 };
 
 window.applyMarketError = (message) => {
+  quoteInFlight = false;
   $("marketLabel").textContent = "行情 · 暂时失联";
   $("marketStatus").style.background = "#d59a45";
   $("speech").textContent = message || "行情暂时没有回应，再试一次吧。";
@@ -173,7 +195,7 @@ window.applySearchResults = (results) => {
     button.addEventListener("click", () => {
       $("stockInput").value = item.code;
       panel.classList.remove("open");
-      requestMarketData();
+      requestMarketData(item.code);
     });
     panel.appendChild(button);
   });
@@ -277,7 +299,12 @@ document.addEventListener("keydown", (event) => {
   }
 });
 
-render();
+if (nativeBridge) {
+  $("stockName").textContent = "等待行情";
+  for (const id of ["stockCode", "change", "updateText"]) $(id).textContent = "";
+  for (const id of ["currentPrice", "prevPrice", "openPrice", "highPrice", "lowPrice"]) $(id).textContent = "—";
+  renderChart(null);
+  nativeBridge.postMessage("restoreQuote");
+} else render();
 restartTimer();
-if (nativeBridge) requestMarketData();
 scheduleIdleMotion();

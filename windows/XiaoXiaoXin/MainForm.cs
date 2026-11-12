@@ -1,6 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
+using Microsoft.Win32;
 using Microsoft.Web.WebView2.Core;
 using Microsoft.Web.WebView2.WinForms;
 
@@ -12,6 +13,9 @@ public sealed class MainForm : Form
     private const int WmHotkey = 0x0312;
     private const uint ModControl = 0x0002;
     private const uint ModShift = 0x0004;
+    private const string PreferencesKey = @"HKEY_CURRENT_USER\Software\XiaoXiaoXin";
+    private const string LastInstrumentValue = "LastViewedInstrument";
+    private string? lastViewedInstrument = ReadLastInstrument();
     private readonly WebView2 web = new() { Dock = DockStyle.Fill, DefaultBackgroundColor = Color.Transparent };
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(12) };
     private readonly NotifyIcon tray = new();
@@ -84,6 +88,7 @@ public sealed class MainForm : Form
                 case "collapse": SetCompact(true); break;
                 case "expand": SetCompact(false); break;
                 case "boss": ToggleVisibility(); break;
+                case "restoreQuote": await ExecuteAsync($"window.restoreLastInstrument({JsonSerializer.Serialize(lastViewedInstrument)})"); break;
             }
             return;
         }
@@ -103,13 +108,28 @@ public sealed class MainForm : Form
 
     private void ToggleVisibility() { if (Visible) Hide(); else { Show(); Activate(); } }
 
+    private static string? ReadLastInstrument()
+    {
+        try { return Registry.GetValue(PreferencesKey, LastInstrumentValue, null) as string; }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException) { return null; }
+    }
+
+    private void SaveLastInstrument(string code)
+    {
+        if (lastViewedInstrument == code) return;
+        lastViewedInstrument = code;
+        try { Registry.SetValue(PreferencesKey, LastInstrumentValue, code); }
+        catch (Exception ex) when (ex is UnauthorizedAccessException or System.Security.SecurityException or IOException) { }
+    }
+
     private async Task LoadQuoteAsync(string rawCode)
     {
         var instrument = ParseInstrument(rawCode);
         if (instrument is null) { await SendErrorAsync("请输入六位股票代码、sh/sz指数代码或中文名称～"); return; }
         refreshCancellation?.Cancel();
-        refreshCancellation = new CancellationTokenSource();
-        var token = refreshCancellation.Token;
+        using var cancellation = new CancellationTokenSource();
+        refreshCancellation = cancellation;
+        var token = cancellation.Token;
         try {
             var (quote, source) = await FetchQuoteWithFallbackAsync(instrument, token);
             TrendData trend;
@@ -118,10 +138,16 @@ public sealed class MainForm : Form
                 trend = await TryFetchTrendAsync(instrument.SecId, token) ?? new TrendData();
                 if (trend.Points.Count > 0) trendCache[instrument.CanonicalCode] = (DateTime.UtcNow, trend);
             }
+            token.ThrowIfCancellationRequested();
             var payload = new { name = quote.Name, displayCode = instrument.DisplayCode, securityType = instrument.SecurityType, price = quote.Price, open = quote.Open, high = quote.High, low = quote.Low, previousClose = quote.PreviousClose, points = trend.Points, source };
-            await ExecuteAsync($"window.applyMarketData({JsonSerializer.Serialize(payload)})");
-        } catch (OperationCanceledException) { }
-        catch { await SendErrorAsync("主数据源和备用源都没有回应，请稍后重试。"); }
+            var json = JsonSerializer.Serialize(payload);
+            SaveLastInstrument(instrument.CanonicalCode);
+            await ExecuteAsync($"window.applyMarketData({json})");
+        } catch (Exception) {
+            if (!token.IsCancellationRequested) await SendErrorAsync("主数据源和备用源都没有回应，请稍后重试。");
+        } finally {
+            if (refreshCancellation == cancellation) refreshCancellation = null;
+        }
     }
 
     private static Instrument? ParseInstrument(string raw)

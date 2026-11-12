@@ -39,6 +39,7 @@ final class DesktopBridge: NSObject, WKScriptMessageHandler {
             case "collapse": controller?.setCompact(true)
             case "expand": controller?.setCompact(false)
             case "boss": controller?.toggleVisibility()
+            case "restoreQuote": controller?.restoreLastInstrument()
             default: break
             }
         } else if let payload = message.body as? [String: Any],
@@ -99,6 +100,7 @@ private struct Instrument {
 
 @MainActor
 final class PetWindowController: NSWindowController {
+    private let lastInstrumentKey = "lastViewedInstrument"
     private let bridge = DesktopBridge()
     private var webView: WKWebView?
     private var compact = true
@@ -171,6 +173,13 @@ final class PetWindowController: NSWindowController {
         }
     }
 
+    func restoreLastInstrument() {
+        let code = UserDefaults.standard.string(forKey: lastInstrumentKey)
+        guard let data = try? JSONEncoder().encode(code),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView?.evaluateJavaScript("window.restoreLastInstrument(\(json))")
+    }
+
     func loadQuote(code: String) {
         guard let instrument = Self.parseInstrument(code) else {
             sendError("请输入六位股票代码、sh/sz指数代码或中文名称～")
@@ -196,6 +205,7 @@ final class PetWindowController: NSWindowController {
             } catch is CancellationError {
                 return
             } catch {
+                guard !Task.isCancelled else { return }
                 sendError("主数据源和备用源都没有回应，请稍后重试。")
             }
         }
@@ -341,6 +351,9 @@ final class PetWindowController: NSWindowController {
         guard JSONSerialization.isValidJSONObject(payload),
               let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
+        if UserDefaults.standard.string(forKey: lastInstrumentKey) != instrument.canonicalCode {
+            UserDefaults.standard.set(instrument.canonicalCode, forKey: lastInstrumentKey)
+        }
         webView?.evaluateJavaScript("window.applyMarketData(\(json))")
         NSLog("Market data loaded for %@ via %@ (%ld points)", instrument.canonicalCode, source, points.count)
     }
