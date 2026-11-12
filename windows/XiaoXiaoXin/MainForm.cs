@@ -105,34 +105,46 @@ public sealed class MainForm : Form
 
     private async Task LoadQuoteAsync(string rawCode)
     {
-        var code = new string(rawCode.Where(char.IsDigit).Take(6).ToArray());
-        if (code.Length != 6) { await SendErrorAsync("请输入六位股票代码～"); return; }
+        var instrument = ParseInstrument(rawCode);
+        if (instrument is null) { await SendErrorAsync("请输入六位股票代码、sh/sz指数代码或中文名称～"); return; }
         refreshCancellation?.Cancel();
         refreshCancellation = new CancellationTokenSource();
         var token = refreshCancellation.Token;
         try {
-            var (quote, source) = await FetchQuoteWithFallbackAsync(code, token);
+            var (quote, source) = await FetchQuoteWithFallbackAsync(instrument, token);
             TrendData trend;
-            if (trendCache.TryGetValue(code, out var cached) && DateTime.UtcNow - cached.Time < TimeSpan.FromMinutes(5)) trend = cached.Data;
+            if (trendCache.TryGetValue(instrument.CanonicalCode, out var cached) && DateTime.UtcNow - cached.Time < TimeSpan.FromMinutes(5)) trend = cached.Data;
             else {
-                trend = await TryFetchTrendAsync(code, token) ?? new TrendData();
-                if (trend.Points.Count > 0) trendCache[code] = (DateTime.UtcNow, trend);
+                trend = await TryFetchTrendAsync(instrument.SecId, token) ?? new TrendData();
+                if (trend.Points.Count > 0) trendCache[instrument.CanonicalCode] = (DateTime.UtcNow, trend);
             }
-            var payload = new { name = quote.Name, displayCode = $"{code}.{(code.StartsWith('6') ? "SH" : "SZ")}", price = quote.Price, open = quote.Open, high = quote.High, low = quote.Low, previousClose = quote.PreviousClose, points = trend.Points, source };
+            var payload = new { name = quote.Name, displayCode = instrument.DisplayCode, securityType = instrument.SecurityType, price = quote.Price, open = quote.Open, high = quote.High, low = quote.Low, previousClose = quote.PreviousClose, points = trend.Points, source };
             await ExecuteAsync($"window.applyMarketData({JsonSerializer.Serialize(payload)})");
         } catch (OperationCanceledException) { }
         catch { await SendErrorAsync("主数据源和备用源都没有回应，请稍后重试。"); }
     }
 
-    private async Task<(MarketQuote Quote, string Source)> FetchQuoteWithFallbackAsync(string code, CancellationToken token)
+    private static Instrument? ParseInstrument(string raw)
     {
-        try { return (await FetchEastmoneyAsync(code, token), "东财"); }
-        catch { return (await FetchTencentAsync(code, token), "腾讯备用源"); }
+        var value = raw.Trim().ToLowerInvariant();
+        string? explicitPrefix = null;
+        if (value.StartsWith("sh") || value.StartsWith("sz")) { explicitPrefix = value[..2]; value = value[2..]; }
+        else if (value.EndsWith(".sh") || value.EndsWith(".sz")) { explicitPrefix = value[^2..]; value = value[..^3]; }
+        if (value.Length != 6 || !value.All(char.IsDigit)) return null;
+        var prefix = explicitPrefix ?? (value.StartsWith('6') || value.StartsWith('5') || value.StartsWith('9') ? "sh" : "sz");
+        var market = prefix == "sh" ? "1" : "0";
+        var isIndex = prefix == "sh" && value.StartsWith("000") || prefix == "sz" && value.StartsWith("399");
+        return new Instrument(value, market, prefix, isIndex ? "指数" : "A股");
     }
 
-    private async Task<MarketQuote> FetchEastmoneyAsync(string code, CancellationToken token)
+    private async Task<(MarketQuote Quote, string Source)> FetchQuoteWithFallbackAsync(Instrument instrument, CancellationToken token)
     {
-        var secid = $"{(code.StartsWith('6') ? "1" : "0")}.{code}";
+        try { return (await FetchEastmoneyAsync(instrument.SecId, instrument.Code, token), "东财"); }
+        catch { return (await FetchTencentAsync(instrument.CanonicalCode, token), "腾讯备用源"); }
+    }
+
+    private async Task<MarketQuote> FetchEastmoneyAsync(string secid, string code, CancellationToken token)
+    {
         var url = $"https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f58,f60";
         using var json = JsonDocument.Parse(await GetWithRetryAsync(url, "https://quote.eastmoney.com/", token));
         var d = json.RootElement.GetProperty("data");
@@ -142,9 +154,8 @@ public sealed class MainForm : Form
         return quote;
     }
 
-    private async Task<MarketQuote> FetchTencentAsync(string code, CancellationToken token)
+    private async Task<MarketQuote> FetchTencentAsync(string symbol, CancellationToken token)
     {
-        var symbol = $"{(code.StartsWith('6') ? "sh" : "sz")}{code}";
         var data = await GetWithRetryAsync($"https://qt.gtimg.cn/q={symbol}", "https://gu.qq.com/", token);
         var text = Encoding.GetEncoding("GB18030").GetString(data);
         var start = text.IndexOf('"') + 1; var end = text.LastIndexOf('"');
@@ -154,10 +165,9 @@ public sealed class MainForm : Form
         return new MarketQuote(v[1], double.Parse(v[3]), double.Parse(v[5]), double.Parse(v[33]), double.Parse(v[34]), double.Parse(v[4]));
     }
 
-    private async Task<TrendData?> TryFetchTrendAsync(string code, CancellationToken token)
+    private async Task<TrendData?> TryFetchTrendAsync(string secid, CancellationToken token)
     {
         try {
-            var secid = $"{(code.StartsWith('6') ? "1" : "0")}.{code}";
             var url = $"https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0";
             using var json = JsonDocument.Parse(await GetWithRetryAsync(url, "https://quote.eastmoney.com/", token));
             var result = new TrendData();
@@ -176,7 +186,12 @@ public sealed class MainForm : Form
             using var json = JsonDocument.Parse(await GetWithRetryAsync(url, "https://quote.eastmoney.com/", CancellationToken.None));
             var results = json.RootElement.GetProperty("QuotationCodeTable").GetProperty("Data").EnumerateArray().Take(6).Select(item => {
                 var code = item.GetProperty("Code").GetString() ?? "";
-                return new { code, name = item.GetProperty("Name").GetString() ?? code, displayCode = $"{code}.{(code.StartsWith('6') ? "SH" : "SZ")}" };
+                var quoteId = item.TryGetProperty("QuoteID", out var quote) ? quote.GetString() ?? "" : "";
+                var quoteMarket = quoteId.Split('.').FirstOrDefault();
+                var market = quoteMarket is "0" or "1" ? quoteMarket : (code.StartsWith('6') ? "1" : "0");
+                var prefix = market == "1" ? "sh" : "sz";
+                var typeName = item.TryGetProperty("SecurityTypeName", out var type) ? type.GetString() ?? "" : "";
+                return new { code = $"{prefix}{code}", name = item.GetProperty("Name").GetString() ?? code, displayCode = $"{code}.{prefix.ToUpperInvariant()}", securityType = typeName.Contains("指数") ? "指数" : "股票" };
             }).ToArray();
             await ExecuteAsync($"window.applySearchResults({JsonSerializer.Serialize(results)})");
         } catch { await ExecuteAsync("window.applySearchResults([])"); }
@@ -206,5 +221,11 @@ public sealed class MainForm : Form
     [DllImport("user32.dll")] private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
 
     private sealed record MarketQuote(string Name, double Price, double Open, double High, double Low, double PreviousClose);
+    private sealed record Instrument(string Code, string Market, string Prefix, string SecurityType)
+    {
+        public string SecId => $"{Market}.{Code}";
+        public string CanonicalCode => $"{Prefix}{Code}";
+        public string DisplayCode => $"{Code}.{Prefix.ToUpperInvariant()}";
+    }
     private sealed class TrendData { public List<double> Points { get; } = []; }
 }

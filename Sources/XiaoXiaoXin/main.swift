@@ -86,6 +86,16 @@ private struct SearchItem: Decodable {
     let QuoteID: String?
     let SecurityTypeName: String?
 }
+private struct Instrument {
+    let code: String
+    let market: String
+    let prefix: String
+    let securityType: String
+
+    var secid: String { "\(market).\(code)" }
+    var canonicalCode: String { "\(prefix)\(code)" }
+    var displayCode: String { "\(code).\(prefix.uppercased())" }
+}
 
 @MainActor
 final class PetWindowController: NSWindowController {
@@ -162,36 +172,50 @@ final class PetWindowController: NSWindowController {
     }
 
     func loadQuote(code: String) {
-        let cleanCode = String(code.filter(\.isNumber).prefix(6))
-        guard cleanCode.count == 6 else {
-            sendError("请输入六位股票代码～")
+        guard let instrument = Self.parseInstrument(code) else {
+            sendError("请输入六位股票代码、sh/sz指数代码或中文名称～")
             return
         }
-        let market = cleanCode.hasPrefix("6") ? "1" : "0"
-        let secid = "\(market).\(cleanCode)"
         quoteTask?.cancel()
         quoteTask = Task { [weak self] in
             guard let self else { return }
             do {
-                let (quote, source) = try await Self.fetchQuoteWithFallback(secid: secid, code: cleanCode)
+                let (quote, source) = try await Self.fetchQuoteWithFallback(instrument: instrument)
                 try Task.checkCancellation()
                 let trend: TrendData
-                if let cached = trendCache[cleanCode], Date().timeIntervalSince(cached.date) < 300 {
+                if let cached = trendCache[instrument.canonicalCode], Date().timeIntervalSince(cached.date) < 300 {
                     trend = cached.data
-                } else if let freshTrend = try? await Self.fetchTrends(secid: secid) {
-                    trendCache[cleanCode] = (Date(), freshTrend)
+                } else if let freshTrend = try? await Self.fetchTrends(secid: instrument.secid) {
+                    trendCache[instrument.canonicalCode] = (Date(), freshTrend)
                     trend = freshTrend
                 } else {
                     trend = TrendData(name: nil, decimal: 2, trends: nil)
                 }
                 try Task.checkCancellation()
-                sendMarketData(code: cleanCode, market: market, quote: quote, trend: trend, source: source)
+                sendMarketData(instrument: instrument, quote: quote, trend: trend, source: source)
             } catch is CancellationError {
                 return
             } catch {
                 sendError("主数据源和备用源都没有回应，请稍后重试。")
             }
         }
+    }
+
+    private static func parseInstrument(_ raw: String) -> Instrument? {
+        var value = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var explicitPrefix: String?
+        if value.hasPrefix("sh") || value.hasPrefix("sz") {
+            explicitPrefix = String(value.prefix(2))
+            value.removeFirst(2)
+        } else if value.hasSuffix(".sh") || value.hasSuffix(".sz") {
+            explicitPrefix = String(value.suffix(2))
+            value.removeLast(3)
+        }
+        guard value.count == 6, value.allSatisfy(\.isNumber) else { return nil }
+        let prefix = explicitPrefix ?? (value.hasPrefix("6") || value.hasPrefix("5") || value.hasPrefix("9") ? "sh" : "sz")
+        let market = prefix == "sh" ? "1" : "0"
+        let isIndex = (prefix == "sh" && value.hasPrefix("000")) || (prefix == "sz" && value.hasPrefix("399"))
+        return Instrument(code: value, market: market, prefix: prefix, securityType: isIndex ? "指数" : "A股")
     }
 
     func searchStocks(query: String) {
@@ -215,12 +239,12 @@ final class PetWindowController: NSWindowController {
         }
     }
 
-    private static func fetchQuoteWithFallback(secid: String, code: String) async throws -> (MarketQuote, String) {
+    private static func fetchQuoteWithFallback(instrument: Instrument) async throws -> (MarketQuote, String) {
         do {
-            let quote = try await fetchEastmoneyQuote(secid: secid)
+            let quote = try await fetchEastmoneyQuote(secid: instrument.secid)
             func price(_ raw: Int?) -> Double { Double(raw ?? 0) / 100.0 }
             let result = MarketQuote(
-                name: quote.f58 ?? code,
+                name: quote.f58 ?? instrument.code,
                 price: price(quote.f43),
                 open: price(quote.f46),
                 high: price(quote.f44),
@@ -230,7 +254,7 @@ final class PetWindowController: NSWindowController {
             guard result.price > 0 else { throw URLError(.cannotParseResponse) }
             return (result, "东财")
         } catch {
-            let quote = try await fetchTencentQuote(code: code)
+            let quote = try await fetchTencentQuote(symbol: instrument.canonicalCode)
             return (quote, "腾讯备用源")
         }
     }
@@ -246,8 +270,7 @@ final class PetWindowController: NSWindowController {
         return quote
     }
 
-    private static func fetchTencentQuote(code: String) async throws -> MarketQuote {
-        let symbol = "\(code.hasPrefix("6") ? "sh" : "sz")\(code)"
+    private static func fetchTencentQuote(symbol: String) async throws -> MarketQuote {
         let url = URL(string: "https://qt.gtimg.cn/q=\(symbol)")!
         let (data, response) = try await fetchData(from: url, referer: "https://gu.qq.com/")
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
@@ -297,7 +320,7 @@ final class PetWindowController: NSWindowController {
         throw lastError
     }
 
-    private func sendMarketData(code: String, market: String, quote: MarketQuote, trend: TrendData, source: String) {
+    private func sendMarketData(instrument: Instrument, quote: MarketQuote, trend: TrendData, source: String) {
         let points = (trend.trends ?? []).compactMap { row -> Double? in
             let values = row.split(separator: ",")
             guard values.count > 2 else { return nil }
@@ -305,7 +328,8 @@ final class PetWindowController: NSWindowController {
         }
         let payload: [String: Any] = [
             "name": quote.name,
-            "displayCode": "\(code).\(market == "1" ? "SH" : "SZ")",
+            "displayCode": instrument.displayCode,
+            "securityType": instrument.securityType,
             "price": quote.price,
             "open": quote.open,
             "high": quote.high,
@@ -318,7 +342,7 @@ final class PetWindowController: NSWindowController {
               let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }
         webView?.evaluateJavaScript("window.applyMarketData(\(json))")
-        NSLog("Market data loaded for %@ via %@ (%ld points)", code, source, points.count)
+        NSLog("Market data loaded for %@ via %@ (%ld points)", instrument.canonicalCode, source, points.count)
     }
 
     private func sendError(_ message: String) {
@@ -330,8 +354,16 @@ final class PetWindowController: NSWindowController {
 
     private func sendSearchResults(_ items: [SearchItem]) {
         let payload: [[String: String]] = items.map { item in
-            let suffix = item.Code.hasPrefix("6") ? "SH" : "SZ"
-            return ["code": item.Code, "name": item.Name, "displayCode": "\(item.Code).\(suffix)"]
+            let quoteMarket = item.QuoteID?.split(separator: ".").first.map(String.init)
+            let market = quoteMarket == "1" || quoteMarket == "0" ? quoteMarket! : (item.Code.hasPrefix("6") ? "1" : "0")
+            let prefix = market == "1" ? "sh" : "sz"
+            let securityType = item.SecurityTypeName?.contains("指数") == true ? "指数" : "股票"
+            return [
+                "code": "\(prefix)\(item.Code)",
+                "name": item.Name,
+                "displayCode": "\(item.Code).\(prefix.uppercased())",
+                "securityType": securityType
+            ]
         }
         guard let data = try? JSONSerialization.data(withJSONObject: payload),
               let json = String(data: data, encoding: .utf8) else { return }

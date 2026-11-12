@@ -19,11 +19,11 @@
         <div class="search-row">
           <label class="search-box">
             <span aria-hidden="true">⌕</span>
-            <input id="stockInput" value="600183" placeholder="输入6位股票代码" autocomplete="off" inputmode="numeric" maxlength="9" />
+            <input id="stockInput" value="600183" placeholder="股票、指数或中文名称" autocomplete="off" maxlength="16" />
           </label>
           <button class="primary-button" id="searchButton">查看</button>
         </div>
-        <div class="search-results" id="searchResults" role="listbox" aria-label="股票搜索结果"></div>
+        <div class="search-results" id="searchResults" role="listbox" aria-label="股票与指数搜索结果"></div>
 
         <div class="quote">
           <div>
@@ -62,7 +62,7 @@
         </dl>
 
         <footer>
-          <span id="updateText">刚刚更新 · 自动刷新 20 秒</span>
+          <span id="updateText">刚刚更新 · 自动刷新 10 秒</span>
           <button id="bossButton">老板键 <kbd>⌘⇧H</kbd></button>
         </footer>
 

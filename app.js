@@ -5,6 +5,8 @@ const stocks = {
   "300750": { name: "宁德时代", code: "300750.SZ", price: 205.36, prev: 207.10 },
 };
 
+const REFRESH_INTERVAL_MS = 10000;
+
 const $ = (id) => document.getElementById(id);
 const petWindow = $("petWindow");
 const nativeBridge = window.webkit?.messageHandlers?.desktop || (window.chrome?.webview ? {
@@ -61,13 +63,13 @@ function render(demoRefresh = false) {
   $("prevPrice").textContent = fmt(active.prev);
   $("speech").textContent = rising ? "今天也稳稳向前！" : "先喝口水，慢慢来。";
   renderChart(realPoints, rising);
-  $("updateText").textContent = `${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新 · 自动刷新 20 秒`;
+  $("updateText").textContent = `${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新 · 自动刷新 10 秒`;
 }
 
 function requestMarketData() {
-  const code = $("stockInput").value.trim().replace(/\D/g, "");
-  if (!/^\d{6}$/.test(code)) {
-    $("speech").textContent = "请输入六位股票代码～";
+  const code = $("stockInput").value.trim();
+  if (!/^(?:\d{6}|(?:sh|sz)\d{6}|\d{6}\.(?:sh|sz))$/i.test(code)) {
+    $("speech").textContent = "请输入代码、sh/sz指数代码或中文名称～";
     return;
   }
   $("marketLabel").textContent = "A股 · 正在更新";
@@ -78,7 +80,7 @@ function requestMarketData() {
 
 function restartTimer() {
   clearInterval(timer);
-  timer = setInterval(() => nativeBridge ? requestMarketData() : render(true), 20000);
+  timer = setInterval(() => nativeBridge ? requestMarketData() : render(true), REFRESH_INTERVAL_MS);
 }
 
 function refresh() {
@@ -91,7 +93,7 @@ function refresh() {
 function selectStock() {
   if (nativeBridge) {
     const query = $("stockInput").value.trim();
-    if (/^\d{6}(\.(SH|SZ))?$/i.test(query)) requestMarketData();
+    if (/^(?:\d{6}|(?:sh|sz)\d{6}|\d{6}\.(?:sh|sz))$/i.test(query)) requestMarketData();
     else if (query) {
       $("miniStatus").textContent = "搜索中…";
       nativeBridge.postMessage({ type: "search", query });
@@ -128,7 +130,7 @@ window.applyMarketData = (data) => {
   $("openPrice").textContent = fmt(data.open);
   $("highPrice").textContent = fmt(data.high);
   $("lowPrice").textContent = fmt(data.low);
-  $("marketLabel").textContent = `A股 · ${data.source || "延迟行情"}`;
+  $("marketLabel").textContent = `${data.securityType || "A股"} · ${data.source || "延迟行情"}`;
   $("marketStatus").style.background = "#59a875";
   const time = new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
   $("miniStatus").textContent = `${time} · ${data.source || "已更新"}`;
@@ -138,7 +140,7 @@ window.applyMarketData = (data) => {
 };
 
 window.applyMarketError = (message) => {
-  $("marketLabel").textContent = "A股 · 暂时失联";
+  $("marketLabel").textContent = "行情 · 暂时失联";
   $("marketStatus").style.background = "#d59a45";
   $("speech").textContent = message || "行情暂时没有回应，再试一次吧。";
   $("miniStatus").textContent = "刷新失败 · 请重试";
@@ -149,7 +151,7 @@ window.applySearchResults = (results) => {
   const panel = $("searchResults");
   panel.replaceChildren();
   if (!results?.length) {
-    $("miniStatus").textContent = "没有找到匹配股票";
+    $("miniStatus").textContent = "没有找到匹配的股票或指数";
     panel.classList.remove("open");
     return;
   }
@@ -160,7 +162,7 @@ window.applySearchResults = (results) => {
     const name = document.createElement("span");
     name.textContent = item.name;
     const code = document.createElement("small");
-    code.textContent = item.displayCode;
+    code.textContent = `${item.displayCode}${item.securityType ? ` · ${item.securityType}` : ""}`;
     button.append(name, code);
     button.addEventListener("click", () => {
       $("stockInput").value = item.code;
