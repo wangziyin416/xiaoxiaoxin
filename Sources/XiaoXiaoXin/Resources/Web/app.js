@@ -14,7 +14,6 @@ const nativeBridge = window.webkit?.messageHandlers?.desktop || (window.chrome?.
   postMessage: (message) => window.chrome.webview.postMessage(message),
 } : null);
 let active = { ...stocks["600183"] };
-let realPoints = null;
 let timer;
 let hasLivePrice = false;
 let selectedCode = null;
@@ -53,15 +52,16 @@ function renderChart(values, rising) {
   const d = points.map((p, i) => `${i ? "L" : "M"}${p.x.toFixed(2)},${p.y.toFixed(2)}`).join(" ");
   $("linePath").setAttribute("d", d);
   $("areaPath").setAttribute("d", `${d} L520,155 L0,155 Z`);
-  $("linePath").style.stroke = rising ? "#e85d54" : "#2a9c68";
-  $("lastPoint").style.stroke = rising ? "#e85d54" : "#2a9c68";
+  const chartColor = nativeBridge ? "#2664a3" : rising ? "#e85d54" : "#2a9c68";
+  $("linePath").style.stroke = chartColor;
+  $("lastPoint").style.stroke = chartColor;
   const last = points.at(-1);
   $("lastPoint").setAttribute("cx", last.x);
   $("lastPoint").setAttribute("cy", last.y);
 }
 
 function render(demoRefresh = false) {
-  if (demoRefresh && !realPoints) active.price = Math.max(.01, active.price + (Math.random() - .42) * active.price * .0015);
+  if (demoRefresh) active.price = Math.max(.01, active.price + (Math.random() - .42) * active.price * .0015);
   const delta = active.price - active.prev;
   const rising = delta >= 0;
   const hasPreviousClose = Number.isFinite(active.prev) && active.prev > 0;
@@ -78,16 +78,17 @@ function render(demoRefresh = false) {
   $("change").className = isIndex ? "index-points" : direction;
   $("prevPrice").textContent = fmt(active.prev);
   $("speech").textContent = rising ? "今天也稳稳向前！" : "先喝口水，慢慢来。";
-  renderChart(realPoints, rising);
+  if (!nativeBridge) renderChart(null, rising);
   $("updateText").textContent = `${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })} 更新 · 自动刷新 10 秒`;
 }
 
 function requestMarketData(code = selectedCode) {
   if (!code || (quoteInFlight && code === selectedCode)) return;
+  const switching = selectedCode && code !== selectedCode;
   selectedCode = code;
   quoteInFlight = true;
   $("marketLabel").textContent = "A股 · 正在更新";
-  $("miniStatus").textContent = "刷新中…";
+  $("miniStatus").textContent = switching ? "切换中…" : "刷新中…";
   $("refreshButton").classList.add("spinning");
   nativeBridge.postMessage({ type: "quote", code });
 }
@@ -131,7 +132,6 @@ function selectStock() {
     return;
   }
   active = { ...found };
-  realPoints = null;
   render();
 }
 
@@ -151,8 +151,7 @@ window.applyMarketData = (data) => {
   const previousDisplayedPrice = active.price;
   const sameInstrument = hasLivePrice && active.code === data.displayCode;
   active = { name: data.name, code: data.displayCode, price: data.price, prev: data.previousClose, securityType: data.securityType };
-  if (data.points?.length) realPoints = data.points;
-  else if (!sameInstrument) realPoints = null;
+  if (!sameInstrument) renderChart(null);
   render();
   $("openPrice").textContent = fmt(data.open);
   $("highPrice").textContent = fmt(data.high);
@@ -164,6 +163,11 @@ window.applyMarketData = (data) => {
   $("refreshButton").classList.remove("spinning");
   if (sameInstrument && data.price !== previousDisplayedPrice) reactToMarket(data.price > previousDisplayedPrice);
   hasLivePrice = true;
+};
+
+window.applyMarketTrend = ({ displayCode, points }) => {
+  if (!hasLivePrice || displayCode !== active.code || !points?.length) return;
+  renderChart(points, active.price >= active.prev);
 };
 
 window.applyMarketError = (message) => {

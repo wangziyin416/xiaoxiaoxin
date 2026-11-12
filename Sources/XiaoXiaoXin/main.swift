@@ -106,6 +106,8 @@ final class PetWindowController: NSWindowController {
     private var compact = true
     private var savedOrigin = NSPoint.zero
     private var quoteTask: Task<Void, Never>?
+    private var trendTask: Task<Void, Never>?
+    private var trendInstrumentCode: String?
     private var trendCache: [String: (date: Date, data: TrendData)] = [:]
 
     init() {
@@ -159,7 +161,7 @@ final class PetWindowController: NSWindowController {
         let oldFrame = window.frame
         let size = shouldCompact ? compactSize : expandedSize
         let newOrigin = NSPoint(x: oldFrame.minX, y: oldFrame.maxY - size.height)
-        window.setFrame(NSRect(origin: newOrigin, size: size), display: true, animate: true)
+        window.setFrame(NSRect(origin: newOrigin, size: size), display: true, animate: false)
     }
 
     func toggleVisibility() {
@@ -191,23 +193,37 @@ final class PetWindowController: NSWindowController {
             do {
                 let (quote, source) = try await Self.fetchQuoteWithFallback(instrument: instrument)
                 try Task.checkCancellation()
-                let trend: TrendData
-                if let cached = trendCache[instrument.canonicalCode], Date().timeIntervalSince(cached.date) < 300 {
-                    trend = cached.data
-                } else if let freshTrend = try? await Self.fetchTrends(secid: instrument.secid) {
-                    trendCache[instrument.canonicalCode] = (Date(), freshTrend)
-                    trend = freshTrend
-                } else {
-                    trend = TrendData(name: nil, decimal: 2, trends: nil)
-                }
-                try Task.checkCancellation()
-                sendMarketData(instrument: instrument, quote: quote, trend: trend, source: source)
+                sendMarketData(instrument: instrument, quote: quote, source: source)
+                updateTrend(for: instrument)
             } catch is CancellationError {
                 return
             } catch {
                 guard !Task.isCancelled else { return }
                 sendError("主数据源和备用源都没有回应，请稍后重试。")
             }
+        }
+    }
+
+    private func updateTrend(for instrument: Instrument) {
+        let code = instrument.canonicalCode
+        let switched = trendInstrumentCode != code
+        if switched {
+            trendTask?.cancel()
+            trendTask = nil
+            trendInstrumentCode = code
+        }
+        if let cached = trendCache[code], Date().timeIntervalSince(cached.date) < 300 {
+            if switched { sendTrend(cached.data, displayCode: instrument.displayCode) }
+            return
+        }
+        guard trendTask == nil else { return }
+        trendTask = Task { [weak self] in
+            let trend = try? await Self.fetchTrends(secid: instrument.secid)
+            guard let self, !Task.isCancelled else { return }
+            trendTask = nil
+            guard let trend, let rows = trend.trends, !rows.isEmpty else { return }
+            trendCache[code] = (Date(), trend)
+            sendTrend(trend, displayCode: instrument.displayCode)
         }
     }
 
@@ -264,6 +280,7 @@ final class PetWindowController: NSWindowController {
             guard result.price > 0 else { throw URLError(.cannotParseResponse) }
             return (result, "东财")
         } catch {
+            try Task.checkCancellation()
             let quote = try await fetchTencentQuote(symbol: instrument.canonicalCode)
             return (quote, "腾讯备用源")
         }
@@ -272,7 +289,7 @@ final class PetWindowController: NSWindowController {
     private static func fetchEastmoneyQuote(secid: String) async throws -> QuoteData {
         let fields = "f43,f44,f45,f46,f58,f60"
         let url = URL(string: "https://push2.eastmoney.com/api/qt/stock/get?secid=\(secid)&fields=\(fields)")!
-        let (data, response) = try await fetchData(from: url)
+        let (data, response) = try await fetchData(from: url, timeout: 4, attempts: 1)
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let quote = try JSONDecoder().decode(QuoteResponse.self, from: data).data else {
             throw URLError(.badServerResponse)
@@ -282,7 +299,7 @@ final class PetWindowController: NSWindowController {
 
     private static func fetchTencentQuote(symbol: String) async throws -> MarketQuote {
         let url = URL(string: "https://qt.gtimg.cn/q=\(symbol)")!
-        let (data, response) = try await fetchData(from: url, referer: "https://gu.qq.com/")
+        let (data, response) = try await fetchData(from: url, referer: "https://gu.qq.com/", timeout: 4, attempts: 1)
         guard (response as? HTTPURLResponse)?.statusCode == 200 else { throw URLError(.badServerResponse) }
         let gb18030 = String.Encoding(rawValue: CFStringConvertEncodingToNSStringEncoding(CFStringEncoding(CFStringEncodings.GB_18030_2000.rawValue)))
         guard let body = String(data: data, encoding: gb18030),
@@ -300,7 +317,7 @@ final class PetWindowController: NSWindowController {
 
     private static func fetchTrends(secid: String) async throws -> TrendData {
         let urlString = "https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid=\(secid)&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0"
-        let (data, response) = try await fetchData(from: URL(string: urlString)!)
+        let (data, response) = try await fetchData(from: URL(string: urlString)!, timeout: 6, attempts: 1)
         guard (response as? HTTPURLResponse)?.statusCode == 200,
               let trends = try JSONDecoder().decode(TrendResponse.self, from: data).data else {
             throw URLError(.badServerResponse)
@@ -308,12 +325,12 @@ final class PetWindowController: NSWindowController {
         return trends
     }
 
-    private static func fetchData(from url: URL, referer: String = "https://quote.eastmoney.com/") async throws -> (Data, URLResponse) {
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 12)
+    private static func fetchData(from url: URL, referer: String = "https://quote.eastmoney.com/", timeout: TimeInterval = 12, attempts: Int = 3) async throws -> (Data, URLResponse) {
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X) AppleWebKit/605.1.15", forHTTPHeaderField: "User-Agent")
         request.setValue(referer, forHTTPHeaderField: "Referer")
         var lastError: Error = URLError(.unknown)
-        for attempt in 0..<3 {
+        for attempt in 0..<attempts {
             do {
                 try Task.checkCancellation()
                 if attempt > 0 {
@@ -330,12 +347,19 @@ final class PetWindowController: NSWindowController {
         throw lastError
     }
 
-    private func sendMarketData(instrument: Instrument, quote: MarketQuote, trend: TrendData, source: String) {
+    private func sendTrend(_ trend: TrendData, displayCode: String) {
         let points = (trend.trends ?? []).compactMap { row -> Double? in
             let values = row.split(separator: ",")
-            guard values.count > 2 else { return nil }
-            return Double(values[2])
+            guard values.count > 2, let point = Double(values[2]), point.isFinite else { return nil }
+            return point
         }
+        guard !points.isEmpty,
+              let data = try? JSONSerialization.data(withJSONObject: ["displayCode": displayCode, "points": points]),
+              let json = String(data: data, encoding: .utf8) else { return }
+        webView?.evaluateJavaScript("window.applyMarketTrend(\(json))")
+    }
+
+    private func sendMarketData(instrument: Instrument, quote: MarketQuote, source: String) {
         let payload: [String: Any] = [
             "name": quote.name,
             "displayCode": instrument.displayCode,
@@ -345,7 +369,6 @@ final class PetWindowController: NSWindowController {
             "high": quote.high,
             "low": quote.low,
             "previousClose": quote.previousClose,
-            "points": points,
             "source": source
         ]
         guard JSONSerialization.isValidJSONObject(payload),
@@ -355,7 +378,7 @@ final class PetWindowController: NSWindowController {
             UserDefaults.standard.set(instrument.canonicalCode, forKey: lastInstrumentKey)
         }
         webView?.evaluateJavaScript("window.applyMarketData(\(json))")
-        NSLog("Market data loaded for %@ via %@ (%ld points)", instrument.canonicalCode, source, points.count)
+        NSLog("Market data loaded for %@ via %@", instrument.canonicalCode, source)
     }
 
     private func sendError(_ message: String) {

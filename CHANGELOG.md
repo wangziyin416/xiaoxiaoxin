@@ -2,6 +2,12 @@
 
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)。
 
+## [0.2.3] - 2026-11-12
+
+- 更新行情面板配色、数字排版和分时图样式，将桌宠及动画移到图表下方。
+- 报价先显示，分时图随后加载。刷新已有报价时保留分时图，避免重复绘制。
+- 缩短切换备用行情源前的等待时间，并加快 macOS 展开和收起。
+
 ## [0.2.2] - 2026-11-12
 
 - 启动时恢复上次成功加载的股票或指数，并自动获取行情。
@@ -39,3 +45,4 @@
 [0.2.0]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.0
 [0.2.1]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.1
 [0.2.2]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.2
+[0.2.3]: https://github.com/wangziyin416/xiaoxiaoxin/releases/tag/v0.2.3

@@ -20,6 +20,8 @@ public sealed class MainForm : Form
     private readonly HttpClient http = new() { Timeout = TimeSpan.FromSeconds(12) };
     private readonly NotifyIcon tray = new();
     private CancellationTokenSource? refreshCancellation;
+    private CancellationTokenSource? trendCancellation;
+    private string? trendInstrumentCode;
     private readonly Dictionary<string, (DateTime Time, TrendData Data)> trendCache = new();
     private bool compact = true;
     private Point dragCursor;
@@ -132,22 +134,53 @@ public sealed class MainForm : Form
         var token = cancellation.Token;
         try {
             var (quote, source) = await FetchQuoteWithFallbackAsync(instrument, token);
-            TrendData trend;
-            if (trendCache.TryGetValue(instrument.CanonicalCode, out var cached) && DateTime.UtcNow - cached.Time < TimeSpan.FromMinutes(5)) trend = cached.Data;
-            else {
-                trend = await TryFetchTrendAsync(instrument.SecId, token) ?? new TrendData();
-                if (trend.Points.Count > 0) trendCache[instrument.CanonicalCode] = (DateTime.UtcNow, trend);
-            }
             token.ThrowIfCancellationRequested();
-            var payload = new { name = quote.Name, displayCode = instrument.DisplayCode, securityType = instrument.SecurityType, price = quote.Price, open = quote.Open, high = quote.High, low = quote.Low, previousClose = quote.PreviousClose, points = trend.Points, source };
+            var payload = new { name = quote.Name, displayCode = instrument.DisplayCode, securityType = instrument.SecurityType, price = quote.Price, open = quote.Open, high = quote.High, low = quote.Low, previousClose = quote.PreviousClose, source };
             var json = JsonSerializer.Serialize(payload);
             SaveLastInstrument(instrument.CanonicalCode);
             await ExecuteAsync($"window.applyMarketData({json})");
+            if (!token.IsCancellationRequested) _ = UpdateTrendAsync(instrument);
         } catch (Exception) {
             if (!token.IsCancellationRequested) await SendErrorAsync("主数据源和备用源都没有回应，请稍后重试。");
         } finally {
             if (refreshCancellation == cancellation) refreshCancellation = null;
         }
+    }
+
+    private async Task UpdateTrendAsync(Instrument instrument)
+    {
+        var code = instrument.CanonicalCode;
+        var switched = trendInstrumentCode != code;
+        if (switched) {
+            trendCancellation?.Cancel();
+            trendCancellation = null;
+            trendInstrumentCode = code;
+        }
+        try {
+            if (trendCache.TryGetValue(code, out var cached) && DateTime.UtcNow - cached.Time < TimeSpan.FromMinutes(5)) {
+                if (switched) await SendTrendAsync(instrument, cached.Data);
+                return;
+            }
+            if (trendCancellation is not null) return;
+            using var cancellation = new CancellationTokenSource();
+            trendCancellation = cancellation;
+            try {
+                var trend = await TryFetchTrendAsync(instrument.SecId, cancellation.Token);
+                if (cancellation.IsCancellationRequested || trend is null || trend.Points.Count == 0) return;
+                trendCache[code] = (DateTime.UtcNow, trend);
+                await SendTrendAsync(instrument, trend);
+            } finally {
+                if (trendCancellation == cancellation) trendCancellation = null;
+            }
+        } catch (Exception ex) {
+            System.Diagnostics.Debug.WriteLine(ex);
+        }
+    }
+
+    private Task SendTrendAsync(Instrument instrument, TrendData trend)
+    {
+        var payload = new { displayCode = instrument.DisplayCode, points = trend.Points };
+        return ExecuteAsync($"window.applyMarketTrend({JsonSerializer.Serialize(payload)})");
     }
 
     private static Instrument? ParseInstrument(string raw)
@@ -166,13 +199,13 @@ public sealed class MainForm : Form
     private async Task<(MarketQuote Quote, string Source)> FetchQuoteWithFallbackAsync(Instrument instrument, CancellationToken token)
     {
         try { return (await FetchEastmoneyAsync(instrument.SecId, instrument.Code, token), "东财"); }
-        catch { return (await FetchTencentAsync(instrument.CanonicalCode, token), "腾讯备用源"); }
+        catch when (!token.IsCancellationRequested) { return (await FetchTencentAsync(instrument.CanonicalCode, token), "腾讯备用源"); }
     }
 
     private async Task<MarketQuote> FetchEastmoneyAsync(string secid, string code, CancellationToken token)
     {
         var url = $"https://push2.eastmoney.com/api/qt/stock/get?secid={secid}&fields=f43,f44,f45,f46,f58,f60";
-        using var json = JsonDocument.Parse(await GetWithRetryAsync(url, "https://quote.eastmoney.com/", token));
+        using var json = JsonDocument.Parse(await GetWithRetryAsync(url, "https://quote.eastmoney.com/", token, timeoutSeconds: 4));
         var d = json.RootElement.GetProperty("data");
         double P(string key) => d.TryGetProperty(key, out var v) && v.TryGetDouble(out var n) ? n / 100d : 0;
         var quote = new MarketQuote(d.GetProperty("f58").GetString() ?? code, P("f43"), P("f46"), P("f44"), P("f45"), P("f60"));
@@ -182,7 +215,7 @@ public sealed class MainForm : Form
 
     private async Task<MarketQuote> FetchTencentAsync(string symbol, CancellationToken token)
     {
-        var data = await GetWithRetryAsync($"https://qt.gtimg.cn/q={symbol}", "https://gu.qq.com/", token);
+        var data = await GetWithRetryAsync($"https://qt.gtimg.cn/q={symbol}", "https://gu.qq.com/", token, timeoutSeconds: 4);
         var text = Encoding.GetEncoding("GB18030").GetString(data);
         var start = text.IndexOf('"') + 1; var end = text.LastIndexOf('"');
         if (start <= 0 || end <= start) throw new InvalidDataException();
@@ -195,11 +228,11 @@ public sealed class MainForm : Form
     {
         try {
             var url = $"https://push2his.eastmoney.com/api/qt/stock/trends2/get?secid={secid}&fields1=f1,f2,f3,f4,f5,f6,f7,f8,f9,f10,f11&fields2=f51,f52,f53,f54,f55,f56,f57,f58&ndays=1&iscr=0";
-            using var json = JsonDocument.Parse(await GetWithRetryAsync(url, "https://quote.eastmoney.com/", token));
+            using var json = JsonDocument.Parse(await GetWithRetryAsync(url, "https://quote.eastmoney.com/", token, timeoutSeconds: 6));
             var result = new TrendData();
             foreach (var row in json.RootElement.GetProperty("data").GetProperty("trends").EnumerateArray()) {
                 var fields = (row.GetString() ?? "").Split(',');
-                if (fields.Length > 2 && double.TryParse(fields[2], out var value)) result.Points.Add(value);
+                if (fields.Length > 2 && double.TryParse(fields[2], System.Globalization.CultureInfo.InvariantCulture, out var value) && double.IsFinite(value)) result.Points.Add(value);
             }
             return result;
         } catch { return null; }
@@ -223,19 +256,21 @@ public sealed class MainForm : Form
         } catch { await ExecuteAsync("window.applySearchResults([])"); }
     }
 
-    private async Task<byte[]> GetWithRetryAsync(string url, string referer, CancellationToken token)
+    private async Task<byte[]> GetWithRetryAsync(string url, string referer, CancellationToken token, int? timeoutSeconds = null)
     {
         Exception? last = null;
-        foreach (var delay in new[] { 0, 1000, 3000 }) {
+        foreach (var delay in timeoutSeconds.HasValue ? new[] { 0 } : new[] { 0, 1000, 3000 }) {
             try {
                 if (delay > 0) await Task.Delay(delay, token);
+                using var requestCancellation = CancellationTokenSource.CreateLinkedTokenSource(token);
+                if (timeoutSeconds.HasValue) requestCancellation.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds.Value));
                 using var request = new HttpRequestMessage(HttpMethod.Get, url);
                 request.Headers.UserAgent.ParseAdd("Mozilla/5.0 (Windows NT 10.0; Win64; x64)");
                 request.Headers.Referrer = new Uri(referer);
-                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, token);
+                using var response = await http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, requestCancellation.Token);
                 response.EnsureSuccessStatusCode();
-                return await response.Content.ReadAsByteArrayAsync(token);
-            } catch (Exception ex) when (ex is not OperationCanceledException) { last = ex; }
+                return await response.Content.ReadAsByteArrayAsync(requestCancellation.Token);
+            } catch (Exception ex) when (!token.IsCancellationRequested && (timeoutSeconds.HasValue || ex is not OperationCanceledException)) { last = ex; }
         }
         throw last ?? new HttpRequestException();
     }
